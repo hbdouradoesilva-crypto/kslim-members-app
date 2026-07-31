@@ -1,0 +1,1 @@
+REVOKE EXECUTE ON FUNCTION public.ensure_admin_prefs() FROM PUBLIC, anon, authenticated;
