@@ -95,6 +95,18 @@ function mask(v: string | null | undefined): string {
   return v.slice(0, 8) + "…";
 }
 
+function maskEmail(email: string | null | undefined): string {
+  if (!email) return "";
+  const [name, domain] = email.split("@");
+  if (!name || !domain) return mask(email);
+  return `${name.slice(0, 2)}***@${domain}`;
+}
+
+function requestPathOnly(request: Request): string {
+  const url = new URL(request.url);
+  return url.pathname;
+}
+
 async function readSecretFromRequest(
   request: Request,
   body: unknown,
@@ -166,12 +178,11 @@ export const Route = createFileRoute("/api/public/webhooks/cakto")({
           const dataKeys = isRecord(data) ? Object.keys(data) : [];
           console.warn("[cakto-webhook] auth failed", {
             source,
-            sample: mask(providedSecret),
             secretLen: providedSecret?.length ?? 0,
             headerNames,
             bodyKeys,
             dataKeys,
-            url: request.url,
+            path: requestPathOnly(request),
           });
           return new Response("Unauthorized", { status: 401, headers: CORS_HEADERS });
         }
@@ -242,16 +253,15 @@ export const Route = createFileRoute("/api/public/webhooks/cakto")({
         const logCtx = {
           event,
           status: statusRaw,
-          email,
+          email: maskEmail(email),
           caktoProductIds,
           caktoProductName,
           externalId,
-          bodyPreview: rawText.slice(0, 4000),
         };
         console.log("[cakto-webhook] processing", {
           event,
           status: statusRaw,
-          email,
+          email: maskEmail(email),
           caktoProductIds,
           externalId,
         });
@@ -322,7 +332,7 @@ export const Route = createFileRoute("/api/public/webhooks/cakto")({
           console.warn("[cakto-webhook] product not mapped", {
             caktoProductIds,
             caktoProductName,
-            email,
+            email: maskEmail(email),
           });
           // Persist so the admin sees it in the dashboard instead of silently dropping the sale.
           try {
@@ -456,7 +466,7 @@ export const Route = createFileRoute("/api/public/webhooks/cakto")({
           const linkResult = await sendMagicLinkForExistingAccount(emailLower);
           if (!linkResult.ok) {
             console.warn("[cakto-webhook] magic link warn", {
-              email: emailLower,
+              email: maskEmail(emailLower),
               reason: linkResult.reason,
             });
           }
