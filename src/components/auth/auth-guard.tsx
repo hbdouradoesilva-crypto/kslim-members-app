@@ -9,7 +9,7 @@ export function AuthGuard({
   children: ReactNode;
   requireAdmin?: boolean;
 }) {
-  const { loading, session, isAdmin } = useAuth();
+  const { loading, session, profile, isAdmin, hasPurchase } = useAuth();
 
   if (loading) {
     return (
@@ -20,6 +20,8 @@ export function AuthGuard({
   }
 
   if (!session) return <Navigate to="/login" replace />;
+  if (profile?.is_active === false) return <Navigate to="/ativar-conta" replace />;
+  if (!requireAdmin && !hasPurchase) return <Navigate to="/ativar-conta" replace />;
   if (requireAdmin && !isAdmin) return <Navigate to="/" replace />;
 
   return <>{children}</>;

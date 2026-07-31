@@ -1,5 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
 
 export const Route = createFileRoute("/login")({
   ssr: false,
@@ -15,16 +17,37 @@ export const Route = createFileRoute("/login")({
 function LoginPage() {
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
+  const [sentTo, setSentTo] = useState("");
   const navigate = useNavigate();
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      if (data.session) navigate({ to: "/", replace: true });
+    });
+  }, [navigate]);
 
   async function submitEmail(e: React.FormEvent) {
     e.preventDefault();
-    if (!email.trim()) return;
+    const emailLower = email.trim().toLowerCase();
+    if (!emailLower) return;
+
     setLoading(true);
-    // Pequeno delay para dar sensação de processamento
-    await new Promise((r) => setTimeout(r, 800));
+    const { error } = await supabase.auth.signInWithOtp({
+      email: emailLower,
+      options: {
+        emailRedirectTo: window.location.origin,
+        shouldCreateUser: false,
+      },
+    });
     setLoading(false);
-    navigate({ to: "/" });
+
+    if (error) {
+      toast.error("Não conseguimos enviar o link. Confira o email da compra e tente novamente.");
+      return;
+    }
+
+    setSentTo(emailLower);
+    toast.success("Link enviado.");
   }
 
   return (
@@ -35,6 +58,12 @@ function LoginPage() {
         <p className="mt-3 text-sm text-muted-foreground">
           Digite seu email e enviaremos um link de acesso.
         </p>
+        {sentTo ? (
+          <div className="mt-6 rounded-2xl border border-primary/20 bg-primary-soft p-4 text-sm leading-relaxed text-foreground">
+            Enviamos um link para <strong>{sentTo}</strong>. Abra pelo mesmo aparelho ou navegador
+            para entrar na área de membros.
+          </div>
+        ) : null}
         <form onSubmit={submitEmail} className="mt-8 space-y-4">
           <label className="block text-xs font-medium text-muted-foreground">
             Email
@@ -53,14 +82,15 @@ function LoginPage() {
             disabled={loading}
             className="w-full rounded-full bg-primary py-3 text-sm font-medium text-primary-foreground disabled:opacity-60"
           >
-            {loading ? "Verificando..." : "Receber link de acesso"}
+            {loading ? "Enviando..." : "Receber link de acesso"}
           </button>
         </form>
         <p className="mt-4 text-center text-[11px] leading-relaxed text-muted-foreground">
           Ainda não comprou?{" "}
           <a href="https://k-slim-protocol.lovable.app" className="underline text-foreground/80">
             Conheça o K-Slim
-          </a>.
+          </a>
+          .
         </p>
       </div>
     </div>

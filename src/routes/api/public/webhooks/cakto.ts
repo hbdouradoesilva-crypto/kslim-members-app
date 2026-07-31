@@ -2,8 +2,8 @@ import { createFileRoute } from "@tanstack/react-router";
 import { timingSafeEqual } from "node:crypto";
 
 function safeEqual(a: string, b: string): boolean {
-  const ab = Buffer.from(a);
-  const bb = Buffer.from(b);
+  const ab = Buffer.from(a.trim());
+  const bb = Buffer.from(b.trim());
   if (ab.length !== bb.length) return false;
   return timingSafeEqual(ab, bb);
 }
@@ -19,13 +19,25 @@ const CORS_HEADERS = {
     "content-type, authorization, x-cakto-secret, x-webhook-secret, x-signature, x-cakto-signature",
 };
 
-function pick(obj: any, paths: string[]): any {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function maybeString(value: unknown): string | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  return String(value);
+}
+
+function pick(obj: unknown, paths: string[]): unknown {
   for (const p of paths) {
     const parts = p.split(".");
-    let cur: any = obj;
+    let cur: unknown = obj;
     let ok = true;
     for (const part of parts) {
-      if (cur == null) { ok = false; break; }
+      if (!isRecord(cur)) {
+        ok = false;
+        break;
+      }
       cur = cur[part];
     }
     if (ok && cur !== undefined && cur !== null && cur !== "") return cur;
@@ -33,17 +45,49 @@ function pick(obj: any, paths: string[]): any {
   return undefined;
 }
 
-function normalizeEvent(raw: string | undefined): "approved" | "refunded" | "chargeback" | "unknown" {
-  const s = (raw ?? "").toString().toLowerCase();
-  // Aceita compra_aprovada E TAMBÉM pix gerado/pendente para facilitar testes
-  if (["approved", "purchase_approved", "paid", "aprovado", "compra_aprovada", "sale_approved", "pix", "gerado", "pending", "waiting", "aguardando"].some((k) => s.includes(k))) return "approved";
-  if (["refund", "refunded", "reembolso", "estorno"].some((k) => s.includes(k))) return "refunded";
-  if (["chargeback"].some((k) => s.includes(k))) return "chargeback";
+function collect(obj: unknown, paths: string[]): string[] {
+  const values: string[] = [];
+  const seen = new Set<string>();
+  for (const path of paths) {
+    const value = pick(obj, [path]);
+    if (value === undefined) continue;
+    const text = String(value).trim();
+    if (!text || seen.has(text)) continue;
+    seen.add(text);
+    values.push(text);
+  }
+  return values;
+}
+
+function normalizeEvent(
+  raw: string | undefined,
+  statusRaw?: string,
+): "approved" | "refunded" | "chargeback" | "unknown" {
+  const event = norm(raw ?? "");
+  const status = norm(statusRaw ?? "");
+  if (
+    ["purchase_approved", "approved", "compra_aprovada", "sale_approved"].some((k) =>
+      event.includes(k),
+    )
+  )
+    return "approved";
+  if (
+    ["refund", "refunded", "purchase_refunded", "reembolso", "estorno"].some(
+      (k) => event.includes(k) || status.includes(k),
+    )
+  )
+    return "refunded";
+  if (event.includes("chargeback") || status.includes("chargeback")) return "chargeback";
+  if (["paid", "approved", "aprovado"].includes(status)) return "approved";
   return "unknown";
 }
 
 function norm(s: string): string {
-  return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+  return s
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
 }
 
 function mask(v: string | null | undefined): string {
@@ -51,28 +95,44 @@ function mask(v: string | null | undefined): string {
   return v.slice(0, 8) + "…";
 }
 
-async function readSecretFromRequest(request: Request, body: any): Promise<{ value: string | null; source: string }> {
-  const headers = [
-    "x-cakto-secret",
-    "x-webhook-secret",
-    "x-signature",
-    "x-cakto-signature",
-  ];
+async function readSecretFromRequest(
+  request: Request,
+  body: unknown,
+): Promise<{ value: string | null; source: string }> {
+  const headers = ["x-cakto-secret", "x-webhook-secret", "x-signature", "x-cakto-signature"];
   for (const h of headers) {
     const v = request.headers.get(h);
-    if (v) return { value: v, source: `header:${h}` };
+    if (v) return { value: v.trim(), source: `header:${h}` };
   }
   const auth = request.headers.get("authorization");
-  if (auth?.startsWith("Bearer ")) return { value: auth.slice(7), source: "header:authorization" };
+  if (auth?.startsWith("Bearer "))
+    return { value: auth.slice(7).trim(), source: "header:authorization" };
 
   const url = new URL(request.url);
   for (const q of ["secret", "token", "signature"]) {
     const v = url.searchParams.get(q);
-    if (v) return { value: v, source: `query:${q}` };
+    if (v) return { value: v.trim(), source: `query:${q}` };
   }
-  const bodySecret = body?.secret ?? body?.data?.secret;
-  if (bodySecret) return { value: String(bodySecret), source: "body" };
+  const bodySecret = pick(body, ["secret", "data.secret", "fields.secret"]);
+  if (bodySecret) return { value: String(bodySecret).trim(), source: "body" };
   return { value: null, source: "none" };
+}
+
+function parseAmountCents(amount: unknown): number | null {
+  if (amount === undefined || amount === null || amount === "") return null;
+  if (typeof amount === "number") return Math.round(amount > 999 ? amount : amount * 100);
+
+  const raw = String(amount).trim();
+  const hasDecimalSeparator = /[,.]\d{1,2}$/.test(raw);
+  const normalized = raw
+    .trim()
+    .replace(/\s/g, "")
+    .replace(/^R\$/i, "")
+    .replace(/\.(?=\d{3}(?:\D|$))/g, "")
+    .replace(",", ".");
+  const value = Number(normalized);
+  if (!Number.isFinite(value)) return null;
+  return Math.round(!hasDecimalSeparator && value > 999 ? value : value * 100);
 }
 
 export const Route = createFileRoute("/api/public/webhooks/cakto")({
@@ -88,8 +148,10 @@ export const Route = createFileRoute("/api/public/webhooks/cakto")({
 
         // parse body FIRST so we can find secrets embedded in it
         const rawText = await request.text();
-        let body: any = {};
-        try { body = rawText ? JSON.parse(rawText) : {}; } catch {
+        let body: unknown = {};
+        try {
+          body = rawText ? JSON.parse(rawText) : {};
+        } catch {
           return new Response("Invalid JSON", { status: 400, headers: CORS_HEADERS });
         }
 
@@ -99,8 +161,9 @@ export const Route = createFileRoute("/api/public/webhooks/cakto")({
           // so we can teach the handler about Cakto's actual secret field. Remove after debugging.
           const headerNames: string[] = [];
           request.headers.forEach((_v, k) => headerNames.push(k));
-          const bodyKeys = body && typeof body === "object" ? Object.keys(body) : [];
-          const dataKeys = body?.data && typeof body.data === "object" ? Object.keys(body.data) : [];
+          const bodyKeys = isRecord(body) ? Object.keys(body) : [];
+          const data = isRecord(body) ? body.data : undefined;
+          const dataKeys = isRecord(data) ? Object.keys(data) : [];
           console.warn("[cakto-webhook] auth failed", {
             source,
             sample: mask(providedSecret),
@@ -113,40 +176,85 @@ export const Route = createFileRoute("/api/public/webhooks/cakto")({
           return new Response("Unauthorized", { status: 401, headers: CORS_HEADERS });
         }
 
-
         // Load admin client only after auth passes
         const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
-        const eventRaw = pick(body, ["event", "type", "data.event", "data.status", "status"]);
-        const event = normalizeEvent(eventRaw);
+        const eventRaw = maybeString(pick(body, ["event", "type", "data.event", "data.type"]));
+        const statusRaw = maybeString(pick(body, ["data.status", "status"]));
+        const event = normalizeEvent(eventRaw, statusRaw);
 
-        const email = pick(body, [
-          "data.customer.email", "customer.email", "buyer.email", "data.buyer.email", "data.email", "email",
+        const email = maybeString(
+          pick(body, [
+            "data.customer.email",
+            "customer.email",
+            "buyer.email",
+            "data.buyer.email",
+            "data.email",
+            "email",
+          ]),
+        );
+        const customerName = maybeString(
+          pick(body, ["data.customer.name", "customer.name", "buyer.name", "data.buyer.name"]),
+        );
+        const caktoProductIds = collect(body, [
+          "data.product.id",
+          "product.id",
+          "data.product_id",
+          "product_id",
+          "data.product.short_id",
+          "product.short_id",
+          "data.short_id",
+          "short_id",
+          "data.offer.id",
+          "offer.id",
+          "data.offer.short_id",
+          "offer.short_id",
         ]);
-        const customerName = pick(body, [
-          "data.customer.name", "customer.name", "buyer.name", "data.buyer.name",
-        ]);
-        const caktoProductId = pick(body, [
-          "data.product.id", "product.id", "data.product_id", "product_id", "data.offer.id", "offer.id",
-        ]);
-        const caktoProductName = pick(body, [
-          "data.product.name", "product.name", "data.offer.name", "offer.name",
-        ]);
-        const externalId = pick(body, [
-          "data.id", "data.transaction_id", "data.order_id", "data.refId", "id", "transaction_id", "order_id",
-        ]);
+        const caktoProductName = maybeString(
+          pick(body, ["data.product.name", "product.name", "data.offer.name", "offer.name"]),
+        );
+        const externalId = maybeString(
+          pick(body, [
+            "data.id",
+            "data.transaction_id",
+            "data.order_id",
+            "data.refId",
+            "data.ref_id",
+            "id",
+            "transaction_id",
+            "order_id",
+            "refId",
+            "ref_id",
+          ]),
+        );
         const amount = pick(body, [
-          "data.amount", "amount", "data.total", "total", "data.price", "price",
+          "data.amount",
+          "amount",
+          "data.total",
+          "total",
+          "data.price",
+          "price",
+          "data.offer.price",
+          "offer.price",
         ]);
-        const amountCents = typeof amount === "number"
-          ? Math.round(amount > 999 ? amount : amount * 100)
-          : amount ? Math.round(Number(amount) * 100) : null;
+        const amountCents = parseAmountCents(amount);
 
         const logCtx = {
-          event, email, caktoProductId, caktoProductName, externalId,
+          event,
+          status: statusRaw,
+          email,
+          caktoProductIds,
+          caktoProductName,
+          externalId,
           bodyPreview: rawText.slice(0, 4000),
         };
-        console.log("[cakto-webhook] processing", { event, email, caktoProductId, externalId });
+        console.log("[cakto-webhook] processing", {
+          event,
+          status: statusRaw,
+          email,
+          caktoProductIds,
+          externalId,
+        });
 
         if (event === "unknown") {
           console.log("[cakto-webhook] ignored", logCtx);
@@ -155,7 +263,8 @@ export const Route = createFileRoute("/api/public/webhooks/cakto")({
 
         // Refunded / chargeback → delete purchase
         if (event === "refunded" || event === "chargeback") {
-          if (!externalId) return new Response("Missing external_id", { status: 400, headers: CORS_HEADERS });
+          if (!externalId)
+            return new Response("Missing external_id", { status: 400, headers: CORS_HEADERS });
           const { error } = await supabaseAdmin
             .from("purchases")
             .delete()
@@ -174,8 +283,11 @@ export const Route = createFileRoute("/api/public/webhooks/cakto")({
         // 1. Idempotency FIRST — if we've already seen this external_id, ack and stop.
         if (externalId) {
           const { data: existingP } = await supabaseAdmin
-            .from("purchases").select("id")
-            .eq("payment_provider", "cakto").eq("external_id", String(externalId)).maybeSingle();
+            .from("purchases")
+            .select("id")
+            .eq("payment_provider", "cakto")
+            .eq("external_id", String(externalId))
+            .maybeSingle();
           if (existingP) {
             return Response.json({ ok: true, already_processed: true }, { headers: CORS_HEADERS });
           }
@@ -183,10 +295,19 @@ export const Route = createFileRoute("/api/public/webhooks/cakto")({
 
         // 2. Find product
         let productId: string | null = null;
-        if (caktoProductId) {
-          const { data } = await supabaseAdmin
-            .from("products").select("id").eq("cakto_product_id", String(caktoProductId)).maybeSingle();
-          productId = data?.id ?? null;
+        if (caktoProductIds.length > 0) {
+          const { data, error } = await supabaseAdmin
+            .from("products")
+            .select("id, cakto_product_id")
+            .in("cakto_product_id", caktoProductIds);
+          if (error) {
+            console.error("[cakto-webhook] product lookup error", error.message);
+            return new Response("Product lookup failed", { status: 500, headers: CORS_HEADERS });
+          }
+          const hit = caktoProductIds
+            .map((candidate) => data?.find((p) => p.cakto_product_id === candidate))
+            .find(Boolean);
+          productId = hit?.id ?? null;
         }
         if (!productId && caktoProductName) {
           const { data: all } = await supabaseAdmin.from("products").select("id, title");
@@ -198,7 +319,11 @@ export const Route = createFileRoute("/api/public/webhooks/cakto")({
           productId = hit?.id ?? null;
         }
         if (!productId) {
-          console.warn("[cakto-webhook] product not mapped", { caktoProductId, caktoProductName, email });
+          console.warn("[cakto-webhook] product not mapped", {
+            caktoProductIds,
+            caktoProductName,
+            email,
+          });
           // Persist so the admin sees it in the dashboard instead of silently dropping the sale.
           try {
             await supabaseAdmin.from("admin_logs").insert({
@@ -206,7 +331,7 @@ export const Route = createFileRoute("/api/public/webhooks/cakto")({
               action: "webhook.product_unmapped",
               target: String(email).toLowerCase(),
               metadata: {
-                cakto_product_id: caktoProductId ?? null,
+                cakto_product_ids: caktoProductIds,
                 cakto_product_name: caktoProductName ?? null,
                 external_id: externalId ?? null,
                 amount_cents: amountCents,
@@ -216,19 +341,25 @@ export const Route = createFileRoute("/api/public/webhooks/cakto")({
           } catch (e) {
             console.error("[cakto-webhook] failed to log unmapped product", (e as Error).message);
           }
-          return Response.json({
-            ok: true,
-            product_mapped: false,
-            cakto_product_id: caktoProductId ?? null,
-            cakto_product_name: caktoProductName ?? null,
-          }, { headers: CORS_HEADERS });
+          return Response.json(
+            {
+              ok: true,
+              product_mapped: false,
+              cakto_product_ids: caktoProductIds,
+              cakto_product_name: caktoProductName ?? null,
+            },
+            { headers: CORS_HEADERS },
+          );
         }
 
         // 3. Find or create user — prefer profiles lookup, then auth lookup, then creation.
-        const emailLower = String(email).toLowerCase();
+        const emailLower = String(email).trim().toLowerCase();
         let userId: string | null = null;
         const { data: prof } = await supabaseAdmin
-          .from("profiles").select("user_id").eq("email", emailLower).maybeSingle();
+          .from("profiles")
+          .select("user_id")
+          .eq("email", emailLower)
+          .maybeSingle();
         if (prof?.user_id) {
           userId = prof.user_id;
         } else {
@@ -248,7 +379,10 @@ export const Route = createFileRoute("/api/public/webhooks/cakto")({
             if (cErr || !created?.user) {
               // Race: another concurrent webhook may have just created this user.
               const { data: prof2 } = await supabaseAdmin
-                .from("profiles").select("user_id").eq("email", emailLower).maybeSingle();
+                .from("profiles")
+                .select("user_id")
+                .eq("email", emailLower)
+                .maybeSingle();
               if (prof2?.user_id) {
                 userId = prof2.user_id;
               } else {
@@ -265,18 +399,24 @@ export const Route = createFileRoute("/api/public/webhooks/cakto")({
           _user_id: userId!,
         });
 
-        await supabaseAdmin.from("profiles").upsert({
-          user_id: userId!,
-          email: emailLower,
-          ...(customerName ? { full_name: String(customerName) } : {}),
-          is_active: true,
-          updated_at: new Date().toISOString(),
-        }, { onConflict: "user_id" });
+        await supabaseAdmin.from("profiles").upsert(
+          {
+            user_id: userId!,
+            email: emailLower,
+            ...(customerName ? { full_name: String(customerName) } : {}),
+            is_active: true,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "user_id" },
+        );
 
-        await supabaseAdmin.from("user_roles").upsert({
-          user_id: userId!,
-          role: "aluno",
-        }, { onConflict: "user_id,role" });
+        await supabaseAdmin.from("user_roles").upsert(
+          {
+            user_id: userId!,
+            role: "aluno",
+          },
+          { onConflict: "user_id,role" },
+        );
 
         const { error: prefsErr } = await supabaseAdmin
           .from("user_profile_prefs")
@@ -293,13 +433,15 @@ export const Route = createFileRoute("/api/public/webhooks/cakto")({
           .eq("product_id", productId)
           .maybeSingle();
 
-        const { error: insErr } = existingEntitlement ? { error: null } : await supabaseAdmin.from("purchases").insert({
-            user_id: userId!,
-            product_id: productId,
-            payment_provider: "cakto",
-            external_id: externalId ? String(externalId) : null,
-            amount_cents: amountCents,
-          });
+        const { error: insErr } = existingEntitlement
+          ? { error: null }
+          : await supabaseAdmin.from("purchases").insert({
+              user_id: userId!,
+              product_id: productId,
+              payment_provider: "cakto",
+              external_id: externalId ? String(externalId) : null,
+              amount_cents: amountCents,
+            });
         if (insErr) {
           if (insErr.message.toLowerCase().includes("duplicate")) {
             return Response.json({ ok: true, already_processed: true }, { headers: CORS_HEADERS });
@@ -313,13 +455,19 @@ export const Route = createFileRoute("/api/public/webhooks/cakto")({
           const { sendMagicLinkForExistingAccount } = await import("@/lib/auth-link.server");
           const linkResult = await sendMagicLinkForExistingAccount(emailLower);
           if (!linkResult.ok) {
-            console.warn("[cakto-webhook] magic link warn", { email: emailLower, reason: linkResult.reason });
+            console.warn("[cakto-webhook] magic link warn", {
+              email: emailLower,
+              reason: linkResult.reason,
+            });
           }
         } catch (e) {
           console.warn("[cakto-webhook] magic link exception", (e as Error).message);
         }
 
-        return Response.json({ ok: true, action: "approved", user_id: userId, product_id: productId }, { headers: CORS_HEADERS });
+        return Response.json(
+          { ok: true, action: "approved", user_id: userId, product_id: productId },
+          { headers: CORS_HEADERS },
+        );
       },
     },
   },

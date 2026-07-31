@@ -1,14 +1,14 @@
 import { createFileRoute, Outlet } from "@tanstack/react-router";
+import { AuthGuard } from "@/components/auth/auth-guard";
 import { AppShell } from "@/components/kslim/app-shell";
 
-// AUTH DESATIVADO PARA DESENVOLVIMENTO LOCAL
-// Para reativar o login, restaure o beforeLoad original com supabase.auth.getUser()
 export const Route = createFileRoute("/_app")({
   ssr: false,
   component: () => (
-    <AppShell>
-      <Outlet />
-    </AppShell>
+    <AuthGuard>
+      <AppShell>
+        <Outlet />
+      </AppShell>
+    </AuthGuard>
   ),
 });
-
