@@ -10,7 +10,7 @@ import {
 import { useEffect, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
-import { reportLovableError } from "../lib/lovable-error-reporting";
+import { reportAppError } from "../lib/error-reporting";
 import { AuthProvider } from "@/hooks/use-auth";
 import { Toaster } from "sonner";
 
@@ -38,7 +38,7 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
   console.error(error);
   const router = useRouter();
   useEffect(() => {
-    reportLovableError(error, { boundary: "tanstack_root_error_component" });
+    reportAppError(error, { boundary: "tanstack_root_error_component" });
   }, [error]);
 
   return (
@@ -46,12 +46,13 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
       <div className="max-w-sm text-center">
         <p className="eyebrow">Algo interrompeu</p>
         <h1 className="mt-3 font-display text-3xl">Esta tela não carregou</h1>
-        <p className="mt-3 text-sm text-muted-foreground">
-          Tente novamente em alguns segundos.
-        </p>
+        <p className="mt-3 text-sm text-muted-foreground">Tente novamente em alguns segundos.</p>
         <div className="mt-6 flex justify-center gap-2">
           <button
-            onClick={() => { router.invalidate(); reset(); }}
+            onClick={() => {
+              router.invalidate();
+              reset();
+            }}
             className="rounded-full bg-primary px-6 py-3 text-sm font-medium text-primary-foreground"
           >
             Tentar novamente
@@ -71,17 +72,27 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1, viewport-fit=cover" },
       { title: "K-Slim — Protocolo Coreano de Modelagem Corporal" },
-      { name: "description", content: "K-Slim é o protocolo coreano de 21 dias para desinchar, afinar a cintura e recuperar a leveza do corpo — em casa, sem academia." },
+      {
+        name: "description",
+        content:
+          "K-Slim é o protocolo coreano de 21 dias para desinchar, afinar a cintura e recuperar a leveza do corpo — em casa, sem academia.",
+      },
       { name: "author", content: "K-Slim" },
       { name: "theme-color", content: "#fdf5f6" },
       { property: "og:title", content: "K-Slim — Protocolo Coreano de Modelagem Corporal" },
-      { property: "og:description", content: "K-Slim é o protocolo coreano de 21 dias para desinchar, afinar a cintura e recuperar a leveza do corpo — em casa, sem academia." },
+      {
+        property: "og:description",
+        content:
+          "K-Slim é o protocolo coreano de 21 dias para desinchar, afinar a cintura e recuperar a leveza do corpo — em casa, sem academia.",
+      },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
       { name: "twitter:title", content: "K-Slim — Protocolo Coreano de Modelagem Corporal" },
-      { name: "twitter:description", content: "K-Slim é o protocolo coreano de 21 dias para desinchar, afinar a cintura e recuperar a leveza do corpo — em casa, sem academia." },
-      { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/ced8a704-74f6-4250-bf70-03bded3b6dc7/id-preview-89096596--cd844a05-92e8-4ddb-a428-9854f309e75f.lovable.app-1783665845624.png" },
-      { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/ced8a704-74f6-4250-bf70-03bded3b6dc7/id-preview-89096596--cd844a05-92e8-4ddb-a428-9854f309e75f.lovable.app-1783665845624.png" },
+      {
+        name: "twitter:description",
+        content:
+          "K-Slim é o protocolo coreano de 21 dias para desinchar, afinar a cintura e recuperar a leveza do corpo — em casa, sem academia.",
+      },
     ],
     links: [
       { rel: "stylesheet", href: appCss },

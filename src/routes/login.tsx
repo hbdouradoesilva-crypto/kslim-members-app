@@ -87,7 +87,7 @@ function LoginPage() {
         </form>
         <p className="mt-4 text-center text-[11px] leading-relaxed text-muted-foreground">
           Ainda não comprou?{" "}
-          <a href="https://k-slim-protocol.lovable.app" className="underline text-foreground/80">
+          <a href="/" className="underline text-foreground/80">
             Conheça o K-Slim
           </a>
           .

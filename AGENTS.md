@@ -1,10 +1,7 @@
-<!-- LOVABLE:BEGIN -->
-> [!IMPORTANT]
-> This project is connected to [Lovable](https://lovable.dev). Avoid rewriting
-> published git history — force pushing, or rebasing/amending/squashing commits
-> that are already pushed — as it rewrites history on Lovable's side and the
-> user will likely lose their project history.
->
-> Commits you push to the connected branch sync back to Lovable and show up in
-> the editor, so keep the branch in a working state.
-<!-- LOVABLE:END -->
+# Project Notes
+
+This project is maintained from the GitHub repository and is not tied to an
+external no-code editor synchronization flow.
+
+Keep `main` deployable, avoid force-pushing shared history, and configure
+production URLs through environment variables instead of hard-coded preview URLs.
