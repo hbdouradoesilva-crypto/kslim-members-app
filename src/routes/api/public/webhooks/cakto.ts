@@ -460,20 +460,6 @@ export const Route = createFileRoute("/api/public/webhooks/cakto")({
           return new Response("Insert failed", { status: 500, headers: CORS_HEADERS });
         }
 
-        // Envia o link mágico de acesso depois que a compra foi registrada.
-        try {
-          const { sendMagicLinkForExistingAccount } = await import("@/lib/auth-link.server");
-          const linkResult = await sendMagicLinkForExistingAccount(emailLower);
-          if (!linkResult.ok) {
-            console.warn("[cakto-webhook] magic link warn", {
-              email: maskEmail(emailLower),
-              reason: linkResult.reason,
-            });
-          }
-        } catch (e) {
-          console.warn("[cakto-webhook] magic link exception", (e as Error).message);
-        }
-
         return Response.json(
           { ok: true, action: "approved", user_id: userId, product_id: productId },
           { headers: CORS_HEADERS },
