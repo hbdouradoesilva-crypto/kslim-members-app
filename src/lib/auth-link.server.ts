@@ -4,10 +4,20 @@ import { PUBLIC_SITE_URL } from "@/lib/site-url";
 
 export type MagicLinkResult =
   | { ok: true }
-  | { ok: false; reason: "not_found" | "inactive" | "rate_limited" | "send_failed"; message?: string };
+  | {
+      ok: false;
+      reason: "not_found" | "inactive" | "rate_limited" | "send_failed";
+      message?: string;
+    };
 
 function normalizeEmail(email: string) {
   return email.trim().toLowerCase();
+}
+
+function maskEmail(email: string) {
+  const [name, domain] = email.split("@");
+  if (!name || !domain) return "invalid-email";
+  return `${name.slice(0, 2)}***@${domain}`;
 }
 
 function createServerPublishableClient() {
@@ -59,9 +69,14 @@ export async function sendMagicLinkForExistingAccount(email: string): Promise<Ma
 
   if (error) {
     const msg = error.message.toLowerCase();
-    console.warn("[magic-link] send failed", { email: emailLower, message: error.message });
-    if (msg.includes("rate") || error.status === 429) return { ok: false, reason: "rate_limited", message: error.message };
-    if (msg.includes("signup") || msg.includes("not allowed") || msg.includes("not found")) return { ok: false, reason: "not_found", message: error.message };
+    console.warn("[magic-link] send failed", {
+      email: maskEmail(emailLower),
+      message: error.message,
+    });
+    if (msg.includes("rate") || error.status === 429)
+      return { ok: false, reason: "rate_limited", message: error.message };
+    if (msg.includes("signup") || msg.includes("not allowed") || msg.includes("not found"))
+      return { ok: false, reason: "not_found", message: error.message };
     return { ok: false, reason: "send_failed", message: error.message };
   }
 
